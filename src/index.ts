@@ -65,7 +65,7 @@ async function cached(
     return fetcher();
   }
 
-  const cache = caches.default;
+  const cache = await caches.open("rodeo-data-api");
   const cacheKey = new Request(request.url, { method: "GET" });
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
