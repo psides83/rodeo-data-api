@@ -38,6 +38,10 @@ export default {
         return json({ error: "Method not allowed" }, 405);
       }
 
+      if (url.pathname === "/v1/db-check") {
+        return checkDatabase(env);
+      }
+
       if (url.pathname === "/v1/wpra/standings") {
         return cached(request, env, ctx, () => getWpraStandings(url, env));
       }
@@ -95,11 +99,12 @@ async function getWpraStandings(url: URL, env: Env): Promise<Response> {
     return json({ error: "circuit_id is required for circuit standings" }, 400);
   }
 
-  const sql = neon(env.DATABASE_URL);
+  const sql = getSql(env);
 
-  const rows =
-    type === "circuit"
-      ? await sql`
+  try {
+    const rows =
+      type === "circuit"
+        ? await sql`
           select
             id,
             contestant_id,
@@ -121,7 +126,7 @@ async function getWpraStandings(url: URL, env: Env): Promise<Response> {
             and circuit_id = ${circuitId}
           order by place asc, earnings desc
         `
-      : await sql`
+        : await sql`
           select
             id,
             contestant_id,
@@ -143,18 +148,48 @@ async function getWpraStandings(url: URL, env: Env): Promise<Response> {
           order by place asc, earnings desc
         `;
 
-  return json(rows);
+    return json(rows);
+  } catch (error) {
+    return databaseError(error);
+  }
 }
 
 async function getPastChampions(env: Env): Promise<Response> {
-  const sql = neon(env.DATABASE_URL);
-  const rows = await sql`
-    select id, year, event, athlete, hometown
-    from past_champions
-    order by year desc, event asc, athlete asc
-  `;
+  const sql = getSql(env);
 
-  return json(rows);
+  try {
+    const rows = await sql`
+      select id, year, event, athlete, hometown
+      from past_champions
+      order by year desc, event asc, athlete asc
+    `;
+
+    return json(rows);
+  } catch (error) {
+    return databaseError(error);
+  }
+}
+
+async function checkDatabase(env: Env): Promise<Response> {
+  if (!env.DATABASE_URL) {
+    return json({ ok: false, error: "DATABASE_URL secret is missing" }, 500);
+  }
+
+  try {
+    const sql = getSql(env);
+    const rows = await sql`select 1 as ok`;
+    return json({ ok: true, result: rows[0] ?? null });
+  } catch (error) {
+    return databaseError(error);
+  }
+}
+
+function getSql(env: Env) {
+  if (!env.DATABASE_URL) {
+    throw new Error("DATABASE_URL secret is missing");
+  }
+
+  return neon(env.DATABASE_URL);
 }
 
 function json(value: unknown, status = 200): Response {
@@ -162,6 +197,20 @@ function json(value: unknown, status = 200): Response {
     status,
     headers: jsonHeaders
   });
+}
+
+function databaseError(error: unknown): Response {
+  console.error(error);
+  const message = error instanceof Error ? error.message : String(error);
+
+  return json(
+    {
+      ok: false,
+      error: "Database request failed",
+      detail: message
+    },
+    500
+  );
 }
 
 function stringParam(url: URL, name: string): string | null {
