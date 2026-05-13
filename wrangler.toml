@@ -1,0 +1,7 @@
+name = "rodeo-data-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-13"
+
+[vars]
+ENVIRONMENT = "development"
+CACHE_TTL_SECONDS = "300"

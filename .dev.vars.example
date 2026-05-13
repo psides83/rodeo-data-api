@@ -1,0 +1,2 @@
+DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+ADMIN_API_KEY="replace-for-admin-import-endpoints-later"
