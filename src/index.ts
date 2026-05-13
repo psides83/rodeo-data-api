@@ -30,7 +30,7 @@ export default {
     const url = new URL(request.url);
 
     try {
-      if (url.pathname === "/health") {
+      if (url.pathname === "/" || url.pathname === "/health") {
         return json({ ok: true });
       }
 
