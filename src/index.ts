@@ -185,21 +185,21 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
       type === "circuit"
         ? await sql`
           select
-            s.standing_id as id,
-            s.contestant_id,
-            coalesce(c.first_name, '') as first_name,
-            coalesce(c.last_name, '') as last_name,
-            c.nick_name as nick_name,
-            coalesce(c.hometown, '') as hometown,
-            c.sidearm_photo_url as photo_url,
-            s.event_abbrev as event,
-            s.standing_type as type,
-            s.earnings,
-            s.points,
-            s.place,
-            s.season_year,
-            s.tour_id,
-            s.circuit_id
+            s.contestant_id as "ContestantId",
+            coalesce(c.first_name, '') as "FirstName",
+            coalesce(c.last_name, '') as "LastName",
+            c.nick_name as "NickName",
+            coalesce(c.hometown, '') as "Hometown",
+            c.sidearm_photo_url as "SidearmPhotoUrl",
+            s.event_abbrev as "Event",
+            s.standing_type as "Type",
+            s.earnings as "Earnings",
+            s.points as "Points",
+            s.place as "Place",
+            s.standing_id as "StandingId",
+            s.season_year as "SeasonYear",
+            s.tour_id as "TourId",
+            s.circuit_id as "CircuitId"
           from prca_standings s
           left join prca_contestants c on c.contestant_id = s.contestant_id
           where s.season_year = ${seasonYear}
@@ -211,21 +211,21 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
         : type === "tour"
           ? await sql`
           select
-            s.standing_id as id,
-            s.contestant_id,
-            coalesce(c.first_name, '') as first_name,
-            coalesce(c.last_name, '') as last_name,
-            c.nick_name as nick_name,
-            coalesce(c.hometown, '') as hometown,
-            c.sidearm_photo_url as photo_url,
-            s.event_abbrev as event,
-            s.standing_type as type,
-            s.earnings,
-            s.points,
-            s.place,
-            s.season_year,
-            s.tour_id,
-            s.circuit_id
+            s.contestant_id as "ContestantId",
+            coalesce(c.first_name, '') as "FirstName",
+            coalesce(c.last_name, '') as "LastName",
+            c.nick_name as "NickName",
+            coalesce(c.hometown, '') as "Hometown",
+            c.sidearm_photo_url as "SidearmPhotoUrl",
+            s.event_abbrev as "Event",
+            s.standing_type as "Type",
+            s.earnings as "Earnings",
+            s.points as "Points",
+            s.place as "Place",
+            s.standing_id as "StandingId",
+            s.season_year as "SeasonYear",
+            s.tour_id as "TourId",
+            s.circuit_id as "CircuitId"
           from prca_standings s
           left join prca_contestants c on c.contestant_id = s.contestant_id
           where s.season_year = ${seasonYear}
@@ -236,21 +236,21 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
         `
         : await sql`
           select
-            s.standing_id as id,
-            s.contestant_id,
-            coalesce(c.first_name, '') as first_name,
-            coalesce(c.last_name, '') as last_name,
-            c.nick_name as nick_name,
-            coalesce(c.hometown, '') as hometown,
-            c.sidearm_photo_url as photo_url,
-            s.event_abbrev as event,
-            s.standing_type as type,
-            s.earnings,
-            s.points,
-            s.place,
-            s.season_year,
-            s.tour_id,
-            s.circuit_id
+            s.contestant_id as "ContestantId",
+            coalesce(c.first_name, '') as "FirstName",
+            coalesce(c.last_name, '') as "LastName",
+            c.nick_name as "NickName",
+            coalesce(c.hometown, '') as "Hometown",
+            c.sidearm_photo_url as "SidearmPhotoUrl",
+            s.event_abbrev as "Event",
+            s.standing_type as "Type",
+            s.earnings as "Earnings",
+            s.points as "Points",
+            s.place as "Place",
+            s.standing_id as "StandingId",
+            s.season_year as "SeasonYear",
+            s.tour_id as "TourId",
+            s.circuit_id as "CircuitId"
           from prca_standings s
           left join prca_contestants c on c.contestant_id = s.contestant_id
           where s.season_year = ${seasonYear}
