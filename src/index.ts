@@ -7,6 +7,7 @@ type Env = {
 
 type StandingType =
   | "world"
+  | "tour"
   | "circuit"
   | "rookie"
   | "permit"
@@ -40,6 +41,10 @@ export default {
 
       if (url.pathname === "/v1/db-check") {
         return checkDatabase(env);
+      }
+
+      if (url.pathname === "/v1/standings" || url.pathname === "/v1/prca/standings") {
+        return cached(request, env, ctx, () => getPrcaStandings(url, env));
       }
 
       if (url.pathname === "/v1/wpra/standings") {
@@ -154,6 +159,112 @@ async function getWpraStandings(url: URL, env: Env): Promise<Response> {
   }
 }
 
+async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
+  const seasonYear = numberParam(url, "season_year");
+  const event = stringParam(url, "event")?.toUpperCase();
+  const type = normalizeStandingType(stringParam(url, "type") ?? "world");
+  const circuitId = numberParam(url, "circuit_id");
+  const tourId = numberParam(url, "tour_id");
+
+  if (!seasonYear || !event || !type) {
+    return json({ error: "season_year, event, and type are required" }, 400);
+  }
+
+  if (type === "circuit" && !circuitId) {
+    return json({ error: "circuit_id is required for circuit standings" }, 400);
+  }
+
+  if (type === "tour" && !tourId) {
+    return json({ error: "tour_id is required for tour standings" }, 400);
+  }
+
+  const sql = getSql(env);
+
+  try {
+    const rows =
+      type === "circuit"
+        ? await sql`
+          select
+            s.id,
+            s.contestant_id,
+            coalesce(c.first_name, s.first_name, '') as first_name,
+            coalesce(c.last_name, s.last_name, '') as last_name,
+            coalesce(c.nick_name, s.nick_name) as nick_name,
+            coalesce(c.hometown, s.hometown, '') as hometown,
+            coalesce(c.photo_url, s.photo_url) as photo_url,
+            s.event,
+            s.type,
+            s.earnings,
+            s.points,
+            s.place,
+            s.season_year,
+            s.tour_id,
+            s.circuit_id
+          from prca_standings s
+          left join prca_contestants c on c.contestant_id = s.contestant_id
+          where s.season_year = ${seasonYear}
+            and s.event = ${event}
+            and s.type = ${type}
+            and s.circuit_id = ${circuitId}
+          order by s.place asc, s.earnings desc
+        `
+        : type === "tour"
+          ? await sql`
+          select
+            s.id,
+            s.contestant_id,
+            coalesce(c.first_name, s.first_name, '') as first_name,
+            coalesce(c.last_name, s.last_name, '') as last_name,
+            coalesce(c.nick_name, s.nick_name) as nick_name,
+            coalesce(c.hometown, s.hometown, '') as hometown,
+            coalesce(c.photo_url, s.photo_url) as photo_url,
+            s.event,
+            s.type,
+            s.earnings,
+            s.points,
+            s.place,
+            s.season_year,
+            s.tour_id,
+            s.circuit_id
+          from prca_standings s
+          left join prca_contestants c on c.contestant_id = s.contestant_id
+          where s.season_year = ${seasonYear}
+            and s.event = ${event}
+            and s.type = ${type}
+            and s.tour_id = ${tourId}
+          order by s.place asc, s.earnings desc
+        `
+        : await sql`
+          select
+            s.id,
+            s.contestant_id,
+            coalesce(c.first_name, s.first_name, '') as first_name,
+            coalesce(c.last_name, s.last_name, '') as last_name,
+            coalesce(c.nick_name, s.nick_name) as nick_name,
+            coalesce(c.hometown, s.hometown, '') as hometown,
+            coalesce(c.photo_url, s.photo_url) as photo_url,
+            s.event,
+            s.type,
+            s.earnings,
+            s.points,
+            s.place,
+            s.season_year,
+            s.tour_id,
+            s.circuit_id
+          from prca_standings s
+          left join prca_contestants c on c.contestant_id = s.contestant_id
+          where s.season_year = ${seasonYear}
+            and s.event = ${event}
+            and s.type = ${type}
+          order by s.place asc, s.earnings desc
+        `;
+
+    return json({ data: rows });
+  } catch (error) {
+    return databaseError(error);
+  }
+}
+
 async function getPastChampions(env: Env): Promise<Response> {
   const sql = getSql(env);
 
@@ -229,6 +340,7 @@ function numberParam(url: URL, name: string): number | null {
 function normalizeStandingType(value: string): StandingType | null {
   const cleaned = value.trim().toLowerCase().replace(/\s+/g, "");
   if (cleaned.includes("world")) return "world";
+  if (cleaned.includes("tour")) return "tour";
   if (cleaned.includes("circuit")) return "circuit";
   if (cleaned.includes("rookie")) return "rookie";
   if (cleaned.includes("permit")) return "permit";
@@ -238,6 +350,7 @@ function normalizeStandingType(value: string): StandingType | null {
 
   const allowed = new Set<StandingType>([
     "world",
+    "tour",
     "circuit",
     "rookie",
     "permit",
