@@ -185,15 +185,15 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
       type === "circuit"
         ? await sql`
           select
-            s.id,
+            s.standing_id as id,
             s.contestant_id,
             coalesce(c.first_name, '') as first_name,
             coalesce(c.last_name, '') as last_name,
             c.nick_name as nick_name,
             coalesce(c.hometown, '') as hometown,
             c.sidearm_photo_url as photo_url,
-            s.event,
-            s.type,
+            s.event_abbrev as event,
+            s.standing_type as type,
             s.earnings,
             s.points,
             s.place,
@@ -203,23 +203,23 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
           from prca_standings s
           left join prca_contestants c on c.contestant_id = s.contestant_id
           where s.season_year = ${seasonYear}
-            and s.event = ${event}
-            and s.type = ${type}
+            and s.event_abbrev = ${event}
+            and s.standing_type = ${type}
             and s.circuit_id = ${circuitId}
           order by s.place asc, s.earnings desc
         `
         : type === "tour"
           ? await sql`
           select
-            s.id,
+            s.standing_id as id,
             s.contestant_id,
             coalesce(c.first_name, '') as first_name,
             coalesce(c.last_name, '') as last_name,
             c.nick_name as nick_name,
             coalesce(c.hometown, '') as hometown,
             c.sidearm_photo_url as photo_url,
-            s.event,
-            s.type,
+            s.event_abbrev as event,
+            s.standing_type as type,
             s.earnings,
             s.points,
             s.place,
@@ -229,22 +229,22 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
           from prca_standings s
           left join prca_contestants c on c.contestant_id = s.contestant_id
           where s.season_year = ${seasonYear}
-            and s.event = ${event}
-            and s.type = ${type}
+            and s.event_abbrev = ${event}
+            and s.standing_type = ${type}
             and s.tour_id = ${tourId}
           order by s.place asc, s.earnings desc
         `
         : await sql`
           select
-            s.id,
+            s.standing_id as id,
             s.contestant_id,
             coalesce(c.first_name, '') as first_name,
             coalesce(c.last_name, '') as last_name,
             c.nick_name as nick_name,
             coalesce(c.hometown, '') as hometown,
             c.sidearm_photo_url as photo_url,
-            s.event,
-            s.type,
+            s.event_abbrev as event,
+            s.standing_type as type,
             s.earnings,
             s.points,
             s.place,
@@ -254,8 +254,8 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
           from prca_standings s
           left join prca_contestants c on c.contestant_id = s.contestant_id
           where s.season_year = ${seasonYear}
-            and s.event = ${event}
-            and s.type = ${type}
+            and s.event_abbrev = ${event}
+            and s.standing_type = ${type}
           order by s.place asc, s.earnings desc
         `;
 
