@@ -43,6 +43,10 @@ export default {
         return checkDatabase(env);
       }
 
+      if (url.pathname === "/v1/schema") {
+        return cached(request, env, ctx, () => getDatabaseSchema(env));
+      }
+
       if (url.pathname === "/v1/standings" || url.pathname === "/v1/prca/standings") {
         return cached(request, env, ctx, () => getPrcaStandings(url, env));
       }
@@ -190,6 +194,7 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
             coalesce(c.last_name, '') as "LastName",
             c.nick_name as "NickName",
             coalesce(c.hometown, '') as "Hometown",
+            c.image_315_url as "image_315_url",
             c.sidearm_photo_url as "SidearmPhotoUrl",
             s.event_abbrev as "Event",
             s.standing_type as "Type",
@@ -216,6 +221,7 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
             coalesce(c.last_name, '') as "LastName",
             c.nick_name as "NickName",
             coalesce(c.hometown, '') as "Hometown",
+            c.image_315_url as "image_315_url",
             c.sidearm_photo_url as "SidearmPhotoUrl",
             s.event_abbrev as "Event",
             s.standing_type as "Type",
@@ -241,6 +247,7 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
             coalesce(c.last_name, '') as "LastName",
             c.nick_name as "NickName",
             coalesce(c.hometown, '') as "Hometown",
+            c.image_315_url as "image_315_url",
             c.sidearm_photo_url as "SidearmPhotoUrl",
             s.event_abbrev as "Event",
             s.standing_type as "Type",
@@ -276,6 +283,41 @@ async function getPastChampions(env: Env): Promise<Response> {
     `;
 
     return json(rows);
+  } catch (error) {
+    return databaseError(error);
+  }
+}
+
+async function getDatabaseSchema(env: Env): Promise<Response> {
+  const sql = getSql(env);
+
+  try {
+    const tables = await sql`
+      select
+        c.table_schema,
+        c.table_name,
+        c.column_name,
+        c.ordinal_position,
+        c.data_type,
+        c.udt_name,
+        c.is_nullable = 'YES' as is_nullable,
+        c.column_default,
+        coalesce(pg_class.reltuples::bigint, 0) as estimated_rows
+      from information_schema.columns c
+      left join pg_namespace
+        on pg_namespace.nspname = c.table_schema
+      left join pg_class
+        on pg_class.relnamespace = pg_namespace.oid
+       and pg_class.relname = c.table_name
+       and pg_class.relkind in ('r', 'p', 'v', 'm')
+      where c.table_schema not in ('information_schema', 'pg_catalog')
+        and c.table_schema not like 'pg_toast%'
+      order by c.table_schema, c.table_name, c.ordinal_position
+    `;
+
+    return json({
+      tables: groupSchemaRows(tables as SchemaColumnRow[])
+    });
   } catch (error) {
     return databaseError(error);
   }
@@ -335,6 +377,62 @@ function numberParam(url: URL, name: string): number | null {
   if (!raw) return null;
   const parsed = Number(raw);
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+type SchemaColumnRow = {
+  table_schema: string;
+  table_name: string;
+  column_name: string;
+  ordinal_position: number;
+  data_type: string;
+  udt_name: string;
+  is_nullable: boolean;
+  column_default: string | null;
+  estimated_rows: number | string;
+};
+
+function groupSchemaRows(rows: SchemaColumnRow[]) {
+  const tables = new Map<
+    string,
+    {
+      schema: string;
+      name: string;
+      estimated_rows: number;
+      columns: Array<{
+        name: string;
+        position: number;
+        data_type: string;
+        udt_name: string;
+        is_nullable: boolean;
+        default: string | null;
+      }>;
+    }
+  >();
+
+  for (const row of rows) {
+    const key = `${row.table_schema}.${row.table_name}`;
+    const table =
+      tables.get(key) ??
+      {
+        schema: row.table_schema,
+        name: row.table_name,
+        estimated_rows: Number(row.estimated_rows),
+        columns: []
+      };
+
+    table.columns.push({
+      name: row.column_name,
+      position: row.ordinal_position,
+      data_type: row.data_type,
+      udt_name: row.udt_name,
+      is_nullable: row.is_nullable,
+      default: row.column_default
+    });
+
+    tables.set(key, table);
+  }
+
+  return Array.from(tables.values());
 }
 
 function normalizeStandingType(value: string): StandingType | null {
