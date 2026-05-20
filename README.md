@@ -20,6 +20,10 @@ Returns the current non-system Neon schemas, tables, columns, types, defaults, n
 
 Returns PRCA standings rows under a `{ "data": [...] }` envelope.
 
+`GET /v1/prca/rodeos?season_year=2026&state=TX&limit=100`
+
+Returns PRCA rodeos from `prca_rodeos` under a `{ "data": [...] }` envelope. Optional filters: `season_year` or `year`, `state`, `rodeo_id` or `id`, `start_date`, `end_date`, `q`, `limit`, and `offset`.
+
 For PRCA circuit and tour standings:
 
 `GET /v1/prca/standings?season_year=2026&event=BB&type=circuit&circuit_id=1`

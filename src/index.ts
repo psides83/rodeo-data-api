@@ -51,6 +51,10 @@ export default {
         return cached(request, env, ctx, () => getPrcaStandings(url, env));
       }
 
+      if (url.pathname === "/v1/prca/rodeos" || url.pathname === "/v1/rodeos") {
+        return cached(request, env, ctx, () => getPrcaRodeos(url, env));
+      }
+
       if (url.pathname === "/v1/wpra/standings") {
         return cached(request, env, ctx, () => getWpraStandings(url, env));
       }
@@ -115,46 +119,68 @@ async function getWpraStandings(url: URL, env: Env): Promise<Response> {
       type === "circuit"
         ? await sql`
           select
-            id,
-            contestant_id,
-            first_name,
-            last_name,
-            hometown,
-            event,
-            type,
-            earnings,
-            points,
-            place,
-            season_year,
-            circuit_id,
-            photo_url
-          from wpra_standings
-          where season_year = ${seasonYear}
-            and event = ${event}
-            and type = ${type}
-            and circuit_id = ${circuitId}
-          order by place asc, earnings desc
+            s.id,
+            coalesce(s.contestant_id, historical.contestant_id) as contestant_id,
+            s.first_name,
+            s.last_name,
+            s.hometown,
+            s.event,
+            s.type,
+            s.earnings,
+            s.points,
+            s.place,
+            s.season_year,
+            s.circuit_id,
+            coalesce(s.photo_url, historical.photo_url) as photo_url
+          from wpra_standings s
+          left join lateral (
+            select contestant_id, photo_url
+            from wpra_standings h
+            where h.event = s.event
+              and lower(h.first_name) = lower(s.first_name)
+              and lower(h.last_name) = lower(s.last_name)
+              and (h.contestant_id is not null or h.photo_url is not null)
+              and h.id <> s.id
+            order by h.season_year desc, h.contestant_id nulls last, h.photo_url nulls last
+            limit 1
+          ) historical on true
+          where s.season_year = ${seasonYear}
+            and s.event = ${event}
+            and s.type = ${type}
+            and s.circuit_id = ${circuitId}
+          order by s.place asc, s.earnings desc
         `
         : await sql`
           select
-            id,
-            contestant_id,
-            first_name,
-            last_name,
-            hometown,
-            event,
-            type,
-            earnings,
-            points,
-            place,
-            season_year,
-            circuit_id,
-            photo_url
-          from wpra_standings
-          where season_year = ${seasonYear}
-            and event = ${event}
-            and type = ${type}
-          order by place asc, earnings desc
+            s.id,
+            coalesce(s.contestant_id, historical.contestant_id) as contestant_id,
+            s.first_name,
+            s.last_name,
+            s.hometown,
+            s.event,
+            s.type,
+            s.earnings,
+            s.points,
+            s.place,
+            s.season_year,
+            s.circuit_id,
+            coalesce(s.photo_url, historical.photo_url) as photo_url
+          from wpra_standings s
+          left join lateral (
+            select contestant_id, photo_url
+            from wpra_standings h
+            where h.event = s.event
+              and lower(h.first_name) = lower(s.first_name)
+              and lower(h.last_name) = lower(s.last_name)
+              and (h.contestant_id is not null or h.photo_url is not null)
+              and h.id <> s.id
+            order by h.season_year desc, h.contestant_id nulls last, h.photo_url nulls last
+            limit 1
+          ) historical on true
+          where s.season_year = ${seasonYear}
+            and s.event = ${event}
+            and s.type = ${type}
+          order by s.place asc, s.earnings desc
         `;
 
     return json(rows);
@@ -272,6 +298,70 @@ async function getPrcaStandings(url: URL, env: Env): Promise<Response> {
   }
 }
 
+async function getPrcaRodeos(url: URL, env: Env): Promise<Response> {
+  const limit = boundedNumberParam(url, "limit", 100, 1, 200);
+  const offset = boundedNumberParam(url, "offset", 0, 0, 10_000);
+  const seasonYear = numberParam(url, "season_year") ?? numberParam(url, "year");
+  const rodeoId = stringParam(url, "rodeo_id") ?? stringParam(url, "id");
+  const query = stringParam(url, "q")?.toLowerCase() ?? null;
+  const startDate = stringParam(url, "start_date");
+  const endDate = stringParam(url, "end_date");
+  const state = stringParam(url, "state")?.toUpperCase() ?? null;
+
+  const sql = getSql(env);
+
+  try {
+    const rows = await sql`
+      select r.*
+      from prca_rodeos r
+      where (${seasonYear?.toString() ?? null}::text is null
+          or to_jsonb(r)->>'season_year' = ${seasonYear?.toString() ?? null}
+          or to_jsonb(r)->>'year' = ${seasonYear?.toString() ?? null})
+        and (${rodeoId}::text is null
+          or to_jsonb(r)->>'rodeo_id' = ${rodeoId}
+          or to_jsonb(r)->>'id' = ${rodeoId})
+        and (${state}::text is null
+          or upper(coalesce(to_jsonb(r)->>'state', to_jsonb(r)->>'state_abbrev', '')) = ${state})
+        and (${startDate}::text is null
+          or coalesce(
+            to_jsonb(r)->>'start_date',
+            to_jsonb(r)->>'rodeo_start_date',
+            to_jsonb(r)->>'performance_date',
+            to_jsonb(r)->>'date',
+            ''
+          ) >= ${startDate ?? ""})
+        and (${endDate}::text is null
+          or coalesce(
+            to_jsonb(r)->>'end_date',
+            to_jsonb(r)->>'rodeo_end_date',
+            to_jsonb(r)->>'performance_date',
+            to_jsonb(r)->>'date',
+            ''
+          ) <= ${endDate ?? ""})
+        and (${query}::text is null
+          or lower(coalesce(to_jsonb(r)->>'name', '')) like ${query ? `%${query}%` : null}
+          or lower(coalesce(to_jsonb(r)->>'rodeo_name', '')) like ${query ? `%${query}%` : null}
+          or lower(coalesce(to_jsonb(r)->>'city', '')) like ${query ? `%${query}%` : null}
+          or lower(coalesce(to_jsonb(r)->>'location', '')) like ${query ? `%${query}%` : null})
+      order by
+        nullif(coalesce(
+          to_jsonb(r)->>'start_date',
+          to_jsonb(r)->>'rodeo_start_date',
+          to_jsonb(r)->>'performance_date',
+          to_jsonb(r)->>'date',
+          ''
+        ), '') asc nulls last,
+        coalesce(to_jsonb(r)->>'name', to_jsonb(r)->>'rodeo_name', '') asc
+      limit ${limit}
+      offset ${offset}
+    `;
+
+    return json({ data: rows });
+  } catch (error) {
+    return databaseError(error);
+  }
+}
+
 async function getPastChampions(env: Env): Promise<Response> {
   const sql = getSql(env);
 
@@ -377,6 +467,17 @@ function numberParam(url: URL, name: string): number | null {
   if (!raw) return null;
   const parsed = Number(raw);
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+function boundedNumberParam(
+  url: URL,
+  name: string,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const value = numberParam(url, name) ?? fallback;
+  return Math.min(Math.max(value, min), max);
 }
 
 type SchemaColumnRow = {
