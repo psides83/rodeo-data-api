@@ -69,9 +69,13 @@ npm run deploy
 
 ## Cache tuning
 
-The Worker caches successful read responses at the Cloudflare edge before hitting Neon. `CACHE_TTL_SECONDS` is the global fallback. Endpoint-specific overrides:
+The Worker caches successful read responses at the Cloudflare edge before hitting Neon.
 
-`STANDINGS_CACHE_TTL_SECONDS`, `RODEOS_CACHE_TTL_SECONDS`, `PAST_CHAMPIONS_CACHE_TTL_SECONDS`, `SCHEMA_CACHE_TTL_SECONDS`, and `CACHE_STALE_WHILE_REVALIDATE_SECONDS`.
+By default, PRCA standings cache until the next 7:30 AM Central refresh window. WPRA standings cache until the next Monday 8:30 AM Central refresh window. Past champions cache until the next December 15 noon Central update window.
+
+Optional fixed-TTL overrides:
+
+`PRCA_STANDINGS_CACHE_TTL_SECONDS`, `WPRA_STANDINGS_CACHE_TTL_SECONDS`, `RODEOS_CACHE_TTL_SECONDS`, `PAST_CHAMPIONS_CACHE_TTL_SECONDS`, `SCHEMA_CACHE_TTL_SECONDS`, and `CACHE_STALE_WHILE_REVALIDATE_SECONDS`.
 
 ## Notes
 

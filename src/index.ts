@@ -3,7 +3,8 @@ import { neon } from "@neondatabase/serverless";
 type Env = {
   DATABASE_URL: string;
   CACHE_TTL_SECONDS?: string;
-  STANDINGS_CACHE_TTL_SECONDS?: string;
+  PRCA_STANDINGS_CACHE_TTL_SECONDS?: string;
+  WPRA_STANDINGS_CACHE_TTL_SECONDS?: string;
   RODEOS_CACHE_TTL_SECONDS?: string;
   PAST_CHAMPIONS_CACHE_TTL_SECONDS?: string;
   SCHEMA_CACHE_TTL_SECONDS?: string;
@@ -53,7 +54,14 @@ export default {
       }
 
       if (url.pathname === "/v1/standings" || url.pathname === "/v1/prca/standings") {
-        return cached(request, env, ctx, () => getPrcaStandings(url, env), "STANDINGS_CACHE_TTL_SECONDS", 300);
+        return cached(
+          request,
+          env,
+          ctx,
+          () => getPrcaStandings(url, env),
+          "PRCA_STANDINGS_CACHE_TTL_SECONDS",
+          secondsUntilNextCentralRefresh({ hour: 7, minute: 30 })
+        );
       }
 
       if (url.pathname === "/v1/prca/rodeos" || url.pathname === "/v1/rodeos") {
@@ -61,11 +69,25 @@ export default {
       }
 
       if (url.pathname === "/v1/wpra/standings") {
-        return cached(request, env, ctx, () => getWpraStandings(url, env), "STANDINGS_CACHE_TTL_SECONDS", 300);
+        return cached(
+          request,
+          env,
+          ctx,
+          () => getWpraStandings(url, env),
+          "WPRA_STANDINGS_CACHE_TTL_SECONDS",
+          secondsUntilNextCentralRefresh({ weekday: 1, hour: 8, minute: 30 })
+        );
       }
 
       if (url.pathname === "/v1/past-champions") {
-        return cached(request, env, ctx, () => getPastChampions(env), "PAST_CHAMPIONS_CACHE_TTL_SECONDS", 86400);
+        return cached(
+          request,
+          env,
+          ctx,
+          () => getPastChampions(env),
+          "PAST_CHAMPIONS_CACHE_TTL_SECONDS",
+          secondsUntilNextCentralRefresh({ month: 12, day: 15, hour: 12, minute: 0 })
+        );
       }
 
       return json({ error: "Not found" }, 404);
@@ -555,8 +577,12 @@ function cacheTtl(env: Env, ttlEnvName: keyof Env, defaultTtl: number): number {
   const endpointTtl = Number(env[ttlEnvName]);
   if (Number.isFinite(endpointTtl)) return endpointTtl;
 
-  const globalTtl = Number(env.CACHE_TTL_SECONDS);
-  return Number.isFinite(globalTtl) ? globalTtl : defaultTtl;
+  if (ttlEnvName === "CACHE_TTL_SECONDS") {
+    const globalTtl = Number(env.CACHE_TTL_SECONDS);
+    return Number.isFinite(globalTtl) ? globalTtl : defaultTtl;
+  }
+
+  return defaultTtl;
 }
 
 function cacheControl(env: Env, ttl: number): string {
@@ -583,6 +609,89 @@ function canonicalCacheRequest(request: Request): Request {
   }
 
   return new Request(url.toString(), { method: "GET" });
+}
+
+type CentralRefreshSchedule = {
+  month?: number;
+  day?: number;
+  weekday?: number;
+  hour: number;
+  minute: number;
+};
+
+function secondsUntilNextCentralRefresh(schedule: CentralRefreshSchedule, now = new Date()): number {
+  const centralNow = centralDateParts(now);
+  const currentSeconds = centralNow.hour * 3600 + centralNow.minute * 60 + centralNow.second;
+  const targetSeconds = schedule.hour * 3600 + schedule.minute * 60;
+
+  if (schedule.month !== undefined && schedule.day !== undefined) {
+    let target = centralUtcDate(centralNow.year, schedule.month, schedule.day, schedule.hour, schedule.minute, 0);
+
+    if (target.getTime() <= now.getTime()) {
+      target = centralUtcDate(centralNow.year + 1, schedule.month, schedule.day, schedule.hour, schedule.minute, 0);
+    }
+
+    return Math.max(1, Math.floor((target.getTime() - now.getTime()) / 1000));
+  }
+
+  if (schedule.weekday === undefined) {
+    const secondsToday = targetSeconds - currentSeconds;
+    return secondsToday > 0 ? secondsToday : secondsToday + 86400;
+  }
+
+  const dayDelta = (schedule.weekday - centralNow.weekday + 7) % 7;
+  const secondsThisWeek = dayDelta * 86400 + targetSeconds - currentSeconds;
+  return secondsThisWeek > 0 ? secondsThisWeek : secondsThisWeek + 7 * 86400;
+}
+
+function centralDateParts(date: Date) {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    weekday: "short",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hourCycle: "h23"
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map((part) => [part.type, part.value]));
+  const weekdays: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6
+  };
+
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekday: weekdays[parts.weekday] ?? 0,
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    second: Number(parts.second)
+  };
+}
+
+function centralUtcDate(year: number, month: number, day: number, hour: number, minute: number, second: number): Date {
+  const approximateUtc = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  const centralParts = centralDateParts(approximateUtc);
+  const centralAsUtc = Date.UTC(
+    centralParts.year,
+    centralParts.month - 1,
+    centralParts.day,
+    centralParts.hour,
+    centralParts.minute,
+    centralParts.second
+  );
+  const intendedAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+
+  return new Date(approximateUtc.getTime() + intendedAsUtc - centralAsUtc);
 }
 
 function stringParam(url: URL, name: string): string | null {
