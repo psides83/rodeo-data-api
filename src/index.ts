@@ -3,6 +3,11 @@ import { neon } from "@neondatabase/serverless";
 type Env = {
   DATABASE_URL: string;
   CACHE_TTL_SECONDS?: string;
+  STANDINGS_CACHE_TTL_SECONDS?: string;
+  RODEOS_CACHE_TTL_SECONDS?: string;
+  PAST_CHAMPIONS_CACHE_TTL_SECONDS?: string;
+  SCHEMA_CACHE_TTL_SECONDS?: string;
+  CACHE_STALE_WHILE_REVALIDATE_SECONDS?: string;
 };
 
 type StandingType =
@@ -44,23 +49,23 @@ export default {
       }
 
       if (url.pathname === "/v1/schema") {
-        return cached(request, env, ctx, () => getDatabaseSchema(env));
+        return cached(request, env, ctx, () => getDatabaseSchema(env), "SCHEMA_CACHE_TTL_SECONDS", 3600);
       }
 
       if (url.pathname === "/v1/standings" || url.pathname === "/v1/prca/standings") {
-        return cached(request, env, ctx, () => getPrcaStandings(url, env));
+        return cached(request, env, ctx, () => getPrcaStandings(url, env), "STANDINGS_CACHE_TTL_SECONDS", 300);
       }
 
       if (url.pathname === "/v1/prca/rodeos" || url.pathname === "/v1/rodeos") {
-        return cached(request, env, ctx, () => getPrcaRodeos(url, env));
+        return cached(request, env, ctx, () => getPrcaRodeos(url, env), "RODEOS_CACHE_TTL_SECONDS", 1800);
       }
 
       if (url.pathname === "/v1/wpra/standings") {
-        return cached(request, env, ctx, () => getWpraStandings(url, env));
+        return cached(request, env, ctx, () => getWpraStandings(url, env), "STANDINGS_CACHE_TTL_SECONDS", 300);
       }
 
       if (url.pathname === "/v1/past-champions") {
-        return cached(request, env, ctx, () => getPastChampions(env));
+        return cached(request, env, ctx, () => getPastChampions(env), "PAST_CHAMPIONS_CACHE_TTL_SECONDS", 86400);
       }
 
       return json({ error: "Not found" }, 404);
@@ -75,22 +80,24 @@ async function cached(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
-  fetcher: () => Promise<Response>
+  fetcher: () => Promise<Response>,
+  ttlEnvName: keyof Env = "CACHE_TTL_SECONDS",
+  defaultTtl = 300
 ): Promise<Response> {
-  const ttl = Number(env.CACHE_TTL_SECONDS ?? "300");
+  const ttl = cacheTtl(env, ttlEnvName, defaultTtl);
   if (!Number.isFinite(ttl) || ttl <= 0) {
     return fetcher();
   }
 
   const cache = await caches.open("rodeo-data-api");
-  const cacheKey = new Request(request.url, { method: "GET" });
+  const cacheKey = canonicalCacheRequest(request);
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
 
   const response = await fetcher();
   if (response.ok) {
     const cachedResponse = new Response(response.body, response);
-    cachedResponse.headers.set("cache-control", `public, max-age=${ttl}`);
+    cachedResponse.headers.set("cache-control", cacheControl(env, ttl));
     ctx.waitUntil(cache.put(cacheKey, cachedResponse.clone()));
     return cachedResponse;
   }
@@ -307,56 +314,144 @@ async function getPrcaRodeos(url: URL, env: Env): Promise<Response> {
   const startDate = stringParam(url, "start_date");
   const endDate = stringParam(url, "end_date");
   const state = stringParam(url, "state")?.toUpperCase() ?? null;
+  const latitude = decimalParam(url, "latitude") ?? decimalParam(url, "lat");
+  const longitude = decimalParam(url, "longitude") ?? decimalParam(url, "lng") ?? decimalParam(url, "lon");
+  const radiusMiles = boundedDecimalParam(url, "radius_miles", 50, 1, 500);
+  const latDelta = latitude === null ? null : radiusMiles / 69;
+  const lonDelta =
+    latitude === null
+      ? null
+      : radiusMiles / Math.max(Math.cos((latitude * Math.PI) / 180) * 69, 1);
+  const minLatitude = latitude === null || latDelta === null ? null : latitude - latDelta;
+  const maxLatitude = latitude === null || latDelta === null ? null : latitude + latDelta;
+  const minLongitude = longitude === null || lonDelta === null ? null : longitude - lonDelta;
+  const maxLongitude = longitude === null || lonDelta === null ? null : longitude + lonDelta;
+
+  if ((latitude === null) !== (longitude === null)) {
+    return json({ error: "latitude and longitude must be provided together" }, 400);
+  }
 
   const sql = getSql(env);
 
   try {
+    if (!seasonYear && !rodeoId && !query && !startDate && !endDate && !state && latitude === null) {
+      const rows = await sql`
+        select *
+        from prca_rodeos
+        limit ${limit}
+        offset ${offset}
+      `;
+
+      return json({ data: rows });
+    }
+
     const rows = await sql`
-      select r.*
-      from prca_rodeos r
+      with rodeos as (
+        select
+          r.*,
+          to_jsonb(r) as data
+        from prca_rodeos r
+      ),
+      normalized as (
+        select
+          rodeos.*,
+          coalesce(
+            data->>'latitude',
+            data->>'lat',
+            data->>'venue_latitude',
+            data->>'venue_lat',
+            data->>'geo_latitude'
+          ) as rodeo_latitude,
+          coalesce(
+            data->>'longitude',
+            data->>'lng',
+            data->>'lon',
+            data->>'venue_longitude',
+            data->>'venue_lng',
+            data->>'geo_longitude'
+          ) as rodeo_longitude
+        from rodeos
+      ),
+      located as (
+        select
+          normalized.*,
+          case
+            when rodeo_latitude ~ '^-?[0-9]+(\.[0-9]+)?$'
+             and rodeo_longitude ~ '^-?[0-9]+(\.[0-9]+)?$'
+            then (
+              3958.7613 * 2 * asin(
+                sqrt(
+                  power(sin(radians((rodeo_latitude::double precision - ${latitude ?? 0}) / 2)), 2)
+                  + cos(radians(${latitude ?? 0}))
+                  * cos(radians(rodeo_latitude::double precision))
+                  * power(sin(radians((rodeo_longitude::double precision - ${longitude ?? 0}) / 2)), 2)
+                )
+              )
+            )
+            else null
+          end as distance_miles
+        from normalized
+      )
+      select
+        data ||
+          case
+            when ${latitude}::double precision is null then '{}'::jsonb
+            else jsonb_build_object('distance_miles', distance_miles)
+          end as rodeo
+      from located
       where (${seasonYear?.toString() ?? null}::text is null
-          or to_jsonb(r)->>'season_year' = ${seasonYear?.toString() ?? null}
-          or to_jsonb(r)->>'year' = ${seasonYear?.toString() ?? null})
+          or data->>'season_year' = ${seasonYear?.toString() ?? null}
+          or data->>'year' = ${seasonYear?.toString() ?? null})
         and (${rodeoId}::text is null
-          or to_jsonb(r)->>'rodeo_id' = ${rodeoId}
-          or to_jsonb(r)->>'id' = ${rodeoId})
+          or data->>'rodeo_id' = ${rodeoId}
+          or data->>'id' = ${rodeoId})
         and (${state}::text is null
-          or upper(coalesce(to_jsonb(r)->>'state', to_jsonb(r)->>'state_abbrev', '')) = ${state})
+          or upper(coalesce(data->>'state', data->>'state_abbrev', '')) = ${state})
         and (${startDate}::text is null
           or coalesce(
-            to_jsonb(r)->>'start_date',
-            to_jsonb(r)->>'rodeo_start_date',
-            to_jsonb(r)->>'performance_date',
-            to_jsonb(r)->>'date',
+            data->>'start_date',
+            data->>'rodeo_start_date',
+            data->>'performance_date',
+            data->>'date',
             ''
           ) >= ${startDate ?? ""})
         and (${endDate}::text is null
           or coalesce(
-            to_jsonb(r)->>'end_date',
-            to_jsonb(r)->>'rodeo_end_date',
-            to_jsonb(r)->>'performance_date',
-            to_jsonb(r)->>'date',
+            data->>'end_date',
+            data->>'rodeo_end_date',
+            data->>'performance_date',
+            data->>'date',
             ''
           ) <= ${endDate ?? ""})
         and (${query}::text is null
-          or lower(coalesce(to_jsonb(r)->>'name', '')) like ${query ? `%${query}%` : null}
-          or lower(coalesce(to_jsonb(r)->>'rodeo_name', '')) like ${query ? `%${query}%` : null}
-          or lower(coalesce(to_jsonb(r)->>'city', '')) like ${query ? `%${query}%` : null}
-          or lower(coalesce(to_jsonb(r)->>'location', '')) like ${query ? `%${query}%` : null})
+          or lower(coalesce(data->>'name', '')) like ${query ? `%${query}%` : null}
+          or lower(coalesce(data->>'rodeo_name', '')) like ${query ? `%${query}%` : null}
+          or lower(coalesce(data->>'city', '')) like ${query ? `%${query}%` : null}
+          or lower(coalesce(data->>'location', '')) like ${query ? `%${query}%` : null})
+        and (${latitude}::double precision is null
+          or (
+            rodeo_latitude ~ '^-?[0-9]+(\.[0-9]+)?$'
+            and rodeo_longitude ~ '^-?[0-9]+(\.[0-9]+)?$'
+            and rodeo_latitude::double precision between ${minLatitude ?? 0} and ${maxLatitude ?? 0}
+            and rodeo_longitude::double precision between ${minLongitude ?? 0} and ${maxLongitude ?? 0}
+          ))
+        and (${latitude}::double precision is null or distance_miles <= ${radiusMiles})
       order by
+        case when ${latitude}::double precision is null then 1 else 0 end asc,
+        distance_miles asc nulls last,
         nullif(coalesce(
-          to_jsonb(r)->>'start_date',
-          to_jsonb(r)->>'rodeo_start_date',
-          to_jsonb(r)->>'performance_date',
-          to_jsonb(r)->>'date',
+          data->>'start_date',
+          data->>'rodeo_start_date',
+          data->>'performance_date',
+          data->>'date',
           ''
         ), '') asc nulls last,
-        coalesce(to_jsonb(r)->>'name', to_jsonb(r)->>'rodeo_name', '') asc
+        coalesce(data->>'name', data->>'rodeo_name', '') asc
       limit ${limit}
       offset ${offset}
     `;
 
-    return json({ data: rows });
+    return json({ data: rows.map((row) => (row as { rodeo: unknown }).rodeo) });
   } catch (error) {
     return databaseError(error);
   }
@@ -456,6 +551,40 @@ function databaseError(error: unknown): Response {
   );
 }
 
+function cacheTtl(env: Env, ttlEnvName: keyof Env, defaultTtl: number): number {
+  const endpointTtl = Number(env[ttlEnvName]);
+  if (Number.isFinite(endpointTtl)) return endpointTtl;
+
+  const globalTtl = Number(env.CACHE_TTL_SECONDS);
+  return Number.isFinite(globalTtl) ? globalTtl : defaultTtl;
+}
+
+function cacheControl(env: Env, ttl: number): string {
+  const staleWhileRevalidate = Number(env.CACHE_STALE_WHILE_REVALIDATE_SECONDS ?? ttl * 2);
+  const directives = [`public`, `max-age=${ttl}`, `s-maxage=${ttl}`];
+
+  if (Number.isFinite(staleWhileRevalidate) && staleWhileRevalidate > 0) {
+    directives.push(`stale-while-revalidate=${staleWhileRevalidate}`);
+  }
+
+  return directives.join(", ");
+}
+
+function canonicalCacheRequest(request: Request): Request {
+  const url = new URL(request.url);
+  const sortedParams = Array.from(url.searchParams.entries()).sort(([leftName, leftValue], [rightName, rightValue]) => {
+    const nameComparison = leftName.localeCompare(rightName);
+    return nameComparison === 0 ? leftValue.localeCompare(rightValue) : nameComparison;
+  });
+
+  url.search = "";
+  for (const [name, value] of sortedParams) {
+    url.searchParams.append(name, value);
+  }
+
+  return new Request(url.toString(), { method: "GET" });
+}
+
 function stringParam(url: URL, name: string): string | null {
   const raw = url.searchParams.get(name);
   const trimmed = raw?.trim();
@@ -469,6 +598,13 @@ function numberParam(url: URL, name: string): number | null {
   return Number.isInteger(parsed) ? parsed : null;
 }
 
+function decimalParam(url: URL, name: string): number | null {
+  const raw = stringParam(url, name);
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function boundedNumberParam(
   url: URL,
   name: string,
@@ -477,6 +613,17 @@ function boundedNumberParam(
   max: number
 ): number {
   const value = numberParam(url, name) ?? fallback;
+  return Math.min(Math.max(value, min), max);
+}
+
+function boundedDecimalParam(
+  url: URL,
+  name: string,
+  fallback: number,
+  min: number,
+  max: number
+): number {
+  const value = decimalParam(url, name) ?? fallback;
   return Math.min(Math.max(value, min), max);
 }
 

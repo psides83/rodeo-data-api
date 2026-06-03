@@ -22,7 +22,11 @@ Returns PRCA standings rows under a `{ "data": [...] }` envelope.
 
 `GET /v1/prca/rodeos?season_year=2026&state=TX&limit=100`
 
-Returns PRCA rodeos from `prca_rodeos` under a `{ "data": [...] }` envelope. Optional filters: `season_year` or `year`, `state`, `rodeo_id` or `id`, `start_date`, `end_date`, `q`, `limit`, and `offset`.
+Returns PRCA rodeos from `prca_rodeos` under a `{ "data": [...] }` envelope. Optional filters: `season_year` or `year`, `state`, `rodeo_id` or `id`, `start_date`, `end_date`, `q`, `latitude` or `lat`, `longitude` or `lng` or `lon`, `radius_miles`, `limit`, and `offset`.
+
+For nearby rodeos:
+
+`GET /v1/prca/rodeos?lat=32.7767&lng=-96.7970&radius_miles=100`
 
 For PRCA circuit and tour standings:
 
@@ -62,6 +66,12 @@ Then deploy:
 ```sh
 npm run deploy
 ```
+
+## Cache tuning
+
+The Worker caches successful read responses at the Cloudflare edge before hitting Neon. `CACHE_TTL_SECONDS` is the global fallback. Endpoint-specific overrides:
+
+`STANDINGS_CACHE_TTL_SECONDS`, `RODEOS_CACHE_TTL_SECONDS`, `PAST_CHAMPIONS_CACHE_TTL_SECONDS`, `SCHEMA_CACHE_TTL_SECONDS`, and `CACHE_STALE_WHILE_REVALIDATE_SECONDS`.
 
 ## Notes
 
