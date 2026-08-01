@@ -77,6 +77,8 @@ Optional fixed-TTL overrides:
 
 `PRCA_STANDINGS_CACHE_TTL_SECONDS`, `WPRA_STANDINGS_CACHE_TTL_SECONDS`, `RODEOS_CACHE_TTL_SECONDS`, `PAST_CHAMPIONS_CACHE_TTL_SECONDS`, `SCHEMA_CACHE_TTL_SECONDS`, and `CACHE_STALE_WHILE_REVALIDATE_SECONDS`.
 
+To force Cloudflare to read fresh data after a manual Neon update, bump `CACHE_VERSION` in `wrangler.toml` and deploy.
+
 ## Notes
 
 The Worker intentionally returns the same JSON field names as the existing Supabase tables. That keeps the app migration small: the iOS client can change base URL and query shape without remapping every field at once.

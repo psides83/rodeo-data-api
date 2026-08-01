@@ -9,6 +9,7 @@ type Env = {
   PAST_CHAMPIONS_CACHE_TTL_SECONDS?: string;
   SCHEMA_CACHE_TTL_SECONDS?: string;
   CACHE_STALE_WHILE_REVALIDATE_SECONDS?: string;
+  CACHE_VERSION?: string;
 };
 
 type StandingType =
@@ -112,7 +113,7 @@ async function cached(
   }
 
   const cache = await caches.open("rodeo-data-api");
-  const cacheKey = canonicalCacheRequest(request);
+  const cacheKey = canonicalCacheRequest(request, env);
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
 
@@ -596,8 +597,9 @@ function cacheControl(env: Env, ttl: number): string {
   return directives.join(", ");
 }
 
-function canonicalCacheRequest(request: Request): Request {
+function canonicalCacheRequest(request: Request, env: Env): Request {
   const url = new URL(request.url);
+  url.searchParams.set("__cache_version", env.CACHE_VERSION ?? "1");
   const sortedParams = Array.from(url.searchParams.entries()).sort(([leftName, leftValue], [rightName, rightValue]) => {
     const nameComparison = leftName.localeCompare(rightName);
     return nameComparison === 0 ? leftValue.localeCompare(rightValue) : nameComparison;
