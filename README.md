@@ -87,7 +87,7 @@ npm run deploy
 
 The Worker caches successful read responses at the Cloudflare edge before hitting Neon. PRCA standings are not cached; every `/v1/standings` and `/v1/prca/standings` request is proxied directly to ProRodeo.
 
-By default, WPRA standings cache until the next Monday 8:30 AM Central refresh window. Past champions cache until the next December 15 noon Central update window.
+By default, WPRA standings cache until the next Monday, Wednesday, or Friday 8:30 AM Central refresh window. Past champions cache until the next December 15 noon Central update window.
 
 Optional fixed-TTL overrides:
 

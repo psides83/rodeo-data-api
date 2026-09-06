@@ -145,6 +145,7 @@ type CentralRefreshSchedule = {
   month?: number;
   day?: number;
   weekday?: number;
+  weekdays?: number[];
   hour: number;
   minute: number;
 };
@@ -164,14 +165,25 @@ export function secondsUntilNextCentralRefresh(schedule: CentralRefreshSchedule,
     return Math.max(1, Math.floor((target.getTime() - now.getTime()) / 1000));
   }
 
-  if (schedule.weekday === undefined) {
+  const weekdays =
+    schedule.weekdays && schedule.weekdays.length > 0
+      ? schedule.weekdays
+      : schedule.weekday !== undefined
+        ? [schedule.weekday]
+        : [];
+
+  if (weekdays.length === 0) {
     const secondsToday = targetSeconds - currentSeconds;
     return secondsToday > 0 ? secondsToday : secondsToday + 86400;
   }
 
-  const dayDelta = (schedule.weekday - centralNow.weekday + 7) % 7;
-  const secondsThisWeek = dayDelta * 86400 + targetSeconds - currentSeconds;
-  return secondsThisWeek > 0 ? secondsThisWeek : secondsThisWeek + 7 * 86400;
+  const secondsUntilNextRefresh = weekdays.map((weekday) => {
+    const dayDelta = (weekday - centralNow.weekday + 7) % 7;
+    const secondsThisWeek = dayDelta * 86400 + targetSeconds - currentSeconds;
+    return secondsThisWeek > 0 ? secondsThisWeek : secondsThisWeek + 7 * 86400;
+  });
+
+  return Math.min(...secondsUntilNextRefresh);
 }
 
 function centralDateParts(date: Date) {

@@ -112,7 +112,7 @@ export default {
           ctx,
           () => getWpraStandings(url, env),
           "WPRA_STANDINGS_CACHE_TTL_SECONDS",
-          secondsUntilNextCentralRefresh({ weekday: 1, hour: 8, minute: 30 })
+          secondsUntilNextCentralRefresh({ weekdays: [1, 3, 5], hour: 8, minute: 30 })
         );
       }
 
